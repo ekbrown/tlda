@@ -125,8 +125,7 @@ disp_DA <- function(subfreq,
     
     DA_score <- calculate_DA(subfreq, partsize, procedure)
     output <- DA_score
-    cat("DA_score = ", DA_score)
-    
+
     if (freq_adjust == TRUE){
       
       subfreq_min_disp <- find_min_disp(
