@@ -47,3 +47,7 @@ Collate:
     'ice_metadata.R'
     'spokenBNC1994_metadata.R'
     'spokenBNC2014_metadata.R'
+LinkingTo: 
+    Rcpp
+Imports: 
+    Rcpp

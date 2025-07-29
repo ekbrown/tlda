@@ -4,7 +4,7 @@
 #' This function calculates the dispersion measure \eqn{D_{A}}. It offers two computational procedures, the basic version as well as a computational shortcut. It allows the user to choose the directionality of scaling, i.e. whether higher values denote a more even or a less even distribution. It also provides the option of calculating frequency-adjusted dispersion scores.
 #'
 #' @inheritParams disp
-#' @param procedure Character string indicating which procedure to use for the calculation of \eqn{D_{A}}. See details below. Possible values are `'basic'` (default), `'shortcut'`.
+#' @param procedure Character string indicating which procedure to use for the calculation of \eqn{D_{A}}. See details below. Possible values are `'basic'` (default), `'shortcut'`, `'shortcut_mod'`, and `'shortcut_Rcpp'`.
 #' 
 #' @author Lukas Soenning
 #' 
@@ -12,7 +12,7 @@
 #' 
 #' - Directionality: \eqn{D_{A}} ranges from 0 to 1. The conventional scaling of dispersion measures (see Juilland & Chang-Rodriguez 1964; Carroll 1970; Rosengren 1971) assigns higher values to more even/dispersed/balanced distributions of subfrequencies across corpus parts. This is the default. Gries (2008) uses the reverse scaling, with higher values denoting a more uneven/bursty/concentrated distribution; use `directionality = "gries"` to choose this option.
 #' 
-#' - Procedure: Irrespective of the directionality of scaling, two computational procedures for \eqn{D_{A}} exist (see below for details). Both appear in Wilcox (1973), where the measure is referred to as MDA. The basic version (represented by the value `"basic"`) carries out the full set of computations required by the composition of the formula. As the number of corpus parts grows, this can become computationally very expensive. Wilcox (1973) also gives a "computational" procedure, which is a shortcut that is much quicker and closely approximates the scores produced by the basic formula. This version is represented by the value `"shortcut"`.
+#' - Procedure: Irrespective of the directionality of scaling, two computational procedures for \eqn{D_{A}} exist (see below for details). Both appear in Wilcox (1973), where the measure is referred to as MDA. The basic version (represented by the value `"basic"`) carries out the full set of computations required by the composition of the formula. As the number of corpus parts grows, this can become computationally very expensive. Wilcox (1973) also gives a "computational" procedure, which is a shortcut that is much quicker and closely approximates the scores produced by the basic formula. This version is represented by the value `"shortcut"`. A quicker version of this shortcut is possible by outsourcing the sorting algorithm to C++ using the `Rcpp` package, with the value `"shortcut_Rcpp"`.
 #' 
 #' - Frequency adjustment: Dispersion scores can be adjusted for frequency using the min-max transformation proposed by Gries (2022: 184-191; 2024: 196-208). The frequency-adjusted score for an item considers the lowest and highest possible level of dispersion it can obtain given its overall corpus frequency as well as the number (and size) of corpus parts. The unadjusted score is then expressed relative to these endpoints, where the dispersion minimum is set to 0, and the dispersion maximum to 1 (expressed in terms of conventional scaling). The frequency-adjusted score falls between these bounds and expresses how close the observed distribution is to the theoretical maximum and minimum. This adjustment therefore requires a maximally and a minimally dispersed distribution of the item across the parts. These hypothetical extremes can be built in different ways. The method used by Gries (2022, 2024) uses a computationally expensive procedure that finds the distribution that produces the highest value on the dispersion measure of interest. The current function constructs extreme distributions in a different way, based on the distributional features pervasiveness (`"pervasive"`) or evenness (`"even"`). You can choose between these with the argument `freq_adjust_method`; the default is `even`. For details and explanations, see `vignette("frequency-adjustment")`. 
 #' 
@@ -78,9 +78,11 @@
 #'   directionality = "conventional",
 #'   freq_adjust = FALSE)
 #' 
+library("Rcpp")
+sourceCpp("src/sort_desc_ref.cpp")
 disp_DA <- function(subfreq,
                     partsize,
-                    procedure = "basic",
+                    procedure = c("basic", "shortcut", "shortcut_mod", "shortcut_Rcpp"),
                     directionality = "conventional",
                     freq_adjust = FALSE,
                     freq_adjust_method = "even",
@@ -105,12 +107,17 @@ disp_DA <- function(subfreq,
     } else if (procedure == "shortcut_mod") {
       DA <- ((2 * sum(sort(r_i, decreasing = TRUE) * 1:k) - 1) / (k - 1)) * ((k-1)/k)
       
+    } else if (procedure == "shortcut_Rcpp") {
+      sort_desc_ref(r_i)
+      DA <- (2 * sum(r_i * 1:k) - 1) / (k - 1)
+
     } else {
       dist_r <- as.matrix(stats::dist(r_i, method = "manhattan"))
       DA <- 1 - (mean(dist_r[lower.tri(dist_r)]) / (2 / k))
     }
   }
   
+  # cat("sum(subfreq) = ", sum(subfreq), "\n")
   if (sum(subfreq) == 0){
     output <- NA
     
@@ -118,6 +125,7 @@ disp_DA <- function(subfreq,
     
     DA_score <- calculate_DA(subfreq, partsize, procedure)
     output <- DA_score
+    cat("DA_score = ", DA_score)
     
     if (freq_adjust == TRUE){
       
@@ -188,6 +196,10 @@ disp_DA <- function(subfreq,
         message("\nComputed using the computational shortcut suggested by")
         message("  Wilcox (1967: 343, 'MDA', column 4) with a minor")
         message("  correction to ensure DA does not exceed 1 (conventional)")
+      } else if (procedure == "shortcut_Rcpp") {
+        message("\nComputed using the computational shortcut suggested by")
+        message("  Wilcox (1967: 343, 'MDA', column 4) with a")
+        message("  speed-up from Rcpp.")
       } else {
         message("\nComputed using the basic formula for DA, see:")
         message("  Wilcox (1967: 343, 'MDA', column 2), Burch et al. (2017: 194-196)")
@@ -490,6 +502,10 @@ disp_DA_tdm <- function(tdm,
       message("\nComputed using the computational shortcut suggested by")
       message("  Wilcox (1967: 343, 'MDA', column 4) with a minor")
       message("  correction to ensure DA does not exceed 1 (conventional)\n")
+    } else if (procedure == "shortcut_Rcpp") {
+      message("\nComputed using the computational shortcut suggested by")
+      message("  Wilcox (1967: 343, 'MDA', column 4) with a")
+      message("  speed-up with Rcpp\n")
     }
   }
   if (row_partsize == "first"){
